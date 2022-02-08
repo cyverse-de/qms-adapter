@@ -1,7 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"flag"
+	"io"
+	"net/http"
+	"net/url"
 
 	"github.com/cyverse-de/configurate"
 	"github.com/cyverse-de/qms-adapter/amqp"
@@ -12,9 +17,56 @@ import (
 
 var log = logging.Log.WithFields(logrus.Fields{"package": "main"})
 
-func getHandler() amqp.HandlerFn {
+type Configuration struct {
+	QMSEnabled  bool
+	QMSEndpoint *url.URL
+}
+
+func getHandler(config *Configuration) amqp.HandlerFn {
 	return func(update *amqp.QMSUpdate) {
-		log.Infof("%+v", update)
+		if config.QMSEnabled {
+			// First get the resource usage info from the provided URL
+			usageResp, err := http.Get(update.ResourceUsageURL)
+			if err != nil {
+				log.Error(err)
+				return
+			}
+
+			if usageResp.StatusCode > 299 {
+				log.Errorf("status code for request to %s was %d", update.ResourceUsageURL, usageResp.StatusCode)
+				return
+			}
+
+			var result map[string]interface{}
+
+			// We do this to make sure it's actually JSON getting passed to the QMS, since that's all it supports.
+			if err = json.NewDecoder(usageResp.Body).Decode(&result); err != nil {
+				log.Error(err)
+				return
+			}
+
+			resultBytes, err := json.Marshal(&result)
+			if err != nil {
+				log.Error(err)
+				return
+			}
+
+			postBody := bytes.NewBuffer(resultBytes)
+
+			postResp, err := http.Post(config.QMSEndpoint.String(), "application/json", postBody)
+			if err != nil {
+				log.Error(err)
+				return
+			}
+
+			postRespBody, err := io.ReadAll(postResp.Body)
+			if err != nil {
+				log.Error(err)
+				return
+			}
+
+			log.Infof("URL: %s, status code: %d, response: %s", postResp.Request.URL.String(), postResp.StatusCode, postRespBody)
+		}
 	}
 }
 
@@ -54,6 +106,30 @@ func main() {
 		log.Fatal("amqp.exchange.type must be set in the configuration file")
 	}
 
+	qmsEnabled := config.GetBool("qms.enabled")
+
+	qmsBase := config.GetString("qms.base")
+	if qmsEnabled && qmsBase == "" {
+		log.Fatal("qms.base must be set if qms.enabled is true")
+	}
+
+	qmsUsage := config.GetString("qms.usage")
+	if qmsEnabled && qmsUsage == "" {
+		log.Fatal("qms.usage must be set if qms.enabled is true")
+	}
+
+	qmsEndpoint, err := url.Parse(qmsBase)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	qmsEndpoint.Path = qmsUsage
+
+	configuration := Configuration{
+		QMSEnabled:  qmsEnabled,
+		QMSEndpoint: qmsEndpoint,
+	}
+
 	amqpConfig := amqp.Configuration{
 		URI:           amqpURI,
 		Exchange:      amqpExchange,
@@ -69,7 +145,7 @@ func main() {
 	log.Infof("AMQP queue name: %s", amqpConfig.Queue)
 	log.Infof("AMQP prefetch amount %d", amqpConfig.PrefetchCount)
 
-	amqpClient, err := amqp.New(&amqpConfig, getHandler())
+	amqpClient, err := amqp.New(&amqpConfig, getHandler(&configuration))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -77,4 +153,5 @@ func main() {
 
 	log.Info("done connecting to the AMQP broker")
 
+	select {}
 }
