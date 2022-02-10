@@ -25,27 +25,7 @@ type Configuration struct {
 func getHandler(config *Configuration) amqp.HandlerFn {
 	return func(update *amqp.QMSUpdate) {
 		if config.QMSEnabled {
-			// First get the resource usage info from the provided URL
-			usageResp, err := http.Get(update.ResourceUsageURL)
-			if err != nil {
-				log.Error(err)
-				return
-			}
-
-			if usageResp.StatusCode > 299 {
-				log.Errorf("status code for request to %s was %d", update.ResourceUsageURL, usageResp.StatusCode)
-				return
-			}
-
-			var result map[string]interface{}
-
-			// We do this to make sure it's actually JSON getting passed to the QMS, since that's all it supports.
-			if err = json.NewDecoder(usageResp.Body).Decode(&result); err != nil {
-				log.Error(err)
-				return
-			}
-
-			resultBytes, err := json.Marshal(&result)
+			resultBytes, err := json.Marshal(&update)
 			if err != nil {
 				log.Error(err)
 				return
@@ -79,6 +59,7 @@ func main() {
 		queue      = flag.String("queue", "qms-adapter", "The AMQP queue name for this service")
 		reconnect  = flag.Bool("reconnect", false, "Whether the AMQP client should reconnect on failure")
 		logLevel   = flag.String("log-level", "info", "One of trace, debug, info, warn, error, fatal, or panic")
+		routingKey = flag.String("routing-key", "qms.usages", "The routing key for incoming AMQP messages")
 	)
 
 	flag.Parse()
@@ -134,6 +115,7 @@ func main() {
 		URI:           amqpURI,
 		Exchange:      amqpExchange,
 		ExchangeType:  amqpExchangeType,
+		RoutingKey:    *routingKey,
 		Reconnect:     *reconnect,
 		Queue:         *queue,
 		PrefetchCount: 0,
@@ -144,6 +126,7 @@ func main() {
 	log.Infof("AMQP reconnect: %v", amqpConfig.Reconnect)
 	log.Infof("AMQP queue name: %s", amqpConfig.Queue)
 	log.Infof("AMQP prefetch amount %d", amqpConfig.PrefetchCount)
+	log.Infof("AMQP routing key: %s", amqpConfig.RoutingKey)
 
 	amqpClient, err := amqp.New(&amqpConfig, getHandler(&configuration))
 	if err != nil {

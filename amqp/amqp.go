@@ -16,13 +16,15 @@ type Configuration struct {
 	Reconnect     bool
 	Exchange      string
 	ExchangeType  string
+	RoutingKey    string
 	Queue         string
 	PrefetchCount int
 }
 
 type QMSUpdate struct {
-	ResourceUsageURL string `json:"resource_usage_url"`
-	ResourceType     string `json:"resource_type"`
+	Attribute string `json:"attribute"`
+	Value     string `json:"value"`
+	Unit      string `json:"unit"`
 }
 
 type HandlerFn func(*QMSUpdate)
@@ -52,7 +54,7 @@ func New(config *Configuration, handler HandlerFn) (*AMQP, error) {
 		config.Exchange,
 		config.ExchangeType,
 		config.Queue,
-		messaging.UpdatesKey,
+		config.RoutingKey,
 		a.recv,
 		config.PrefetchCount,
 	)
