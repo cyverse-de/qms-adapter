@@ -11,6 +11,7 @@ import (
 
 var log = logging.Log.WithFields(logrus.Fields{"package": "amqp"})
 
+// Configuration contains the AMQP settings.
 type Configuration struct {
 	URI           string
 	Reconnect     bool
@@ -21,19 +22,25 @@ type Configuration struct {
 	PrefetchCount int
 }
 
+// QMSUpdate contains the information sent to the QMS service.
 type QMSUpdate struct {
 	Attribute string `json:"attribute"`
 	Value     string `json:"value"`
 	Unit      string `json:"unit"`
+	UserID    string `json:"user_id"`
+	Username  string `json:"username"`
 }
 
+// HandlerFn is the function signature for QMS update handlers.
 type HandlerFn func(*QMSUpdate)
 
+// AMQP encapsulates the logic for handling AMQP messages.
 type AMQP struct {
 	client  *messaging.Client
 	handler HandlerFn
 }
 
+// New returns a new *AMQP based on the configuration and HandlerFn passed in.
 func New(config *Configuration, handler HandlerFn) (*AMQP, error) {
 	log.Debug("creating a new AMQP client")
 	client, err := messaging.NewClient(config.URI, config.Reconnect)
@@ -93,10 +100,7 @@ func (a *AMQP) recv(delivery amqp.Delivery) {
 	a.handler(&update)
 }
 
-func (a *AMQP) Listen() {
-	a.client.Listen()
-}
-
+// Close closes the connection to the AMQP broker.
 func (a *AMQP) Close() {
 	a.client.Close()
 }
