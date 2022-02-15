@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
+	"time"
 
 	"github.com/cyverse-de/configurate"
 	"github.com/cyverse-de/qms-adapter/amqp"
@@ -17,10 +19,24 @@ import (
 
 var log = logging.Log.WithFields(logrus.Fields{"package": "main"})
 
+// Configuration contains app-wide configuration settings.
 type Configuration struct {
 	QMSEnabled  bool
 	QMSEndpoint *url.URL
 }
+
+// QMSUsageUpdate contains the fields needed to post updates
+// to QMS.
+type QMSUsageUpdate struct {
+	Username             string  `json:"username"`
+	ResourceType         string  `json:"resource_type"`
+	UpdateType           string  `json:"update_type"`
+	UsageAdjustmentValue float64 `json:"usage_adjustment_value"`
+	EffectiveDate        string  `json:"effective_date"`
+	Unit                 string  `json:"unit"`
+}
+
+const QMSUpdateTypeSet = "SET"
 
 func getHandler(config *Configuration) amqp.HandlerFn {
 	return func(update *amqp.QMSUpdate) {
@@ -29,27 +45,49 @@ func getHandler(config *Configuration) amqp.HandlerFn {
 		log.Debugf("QMS enabled: %v", config.QMSEnabled)
 
 		if config.QMSEnabled {
-			resultBytes, err := json.Marshal(&update)
+			updateValue, err := strconv.ParseFloat(update.Value, 64)
 			if err != nil {
 				log.Error(err)
 				return
 			}
 
-			postBody := bytes.NewBuffer(resultBytes)
+			putUpdate := &QMSUsageUpdate{
+				Username:             update.Username,
+				ResourceType:         update.Attribute,
+				UpdateType:           QMSUpdateTypeSet,
+				EffectiveDate:        time.Now().Format("2006-01-02"),
+				Unit:                 update.Unit,
+				UsageAdjustmentValue: updateValue,
+			}
 
-			postResp, err := http.Post(config.QMSEndpoint.String(), "application/json", postBody)
+			resultBytes, err := json.Marshal(&putUpdate)
 			if err != nil {
 				log.Error(err)
 				return
 			}
 
-			postRespBody, err := io.ReadAll(postResp.Body)
+			putBody := bytes.NewBuffer(resultBytes)
+
+			updateRequest, err := http.NewRequest(http.MethodPut, config.QMSEndpoint.String(), putBody)
+			if err != nil {
+				log.Error(err)
+				return
+			}
+			updateRequest.Header.Set("Content-Type", "application/json")
+
+			putResp, err := http.DefaultClient.Do(updateRequest)
 			if err != nil {
 				log.Error(err)
 				return
 			}
 
-			log.Infof("URL: %s, status code: %d, response: %s", postResp.Request.URL.String(), postResp.StatusCode, postRespBody)
+			putRespBody, err := io.ReadAll(putResp.Body)
+			if err != nil {
+				log.Error(err)
+				return
+			}
+
+			log.Infof("URL: %s, status code: %d, response: %s", putResp.Request.URL.String(), putResp.StatusCode, putRespBody)
 		} else {
 			log.Infof("%+v", update)
 		}
