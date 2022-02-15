@@ -69,6 +69,13 @@ func (a *AMQP) recv(delivery amqp.Delivery) {
 		err    error
 	)
 
+	log.Debugf(
+		"message received; exchange: %s, routing key: %s, body: %s",
+		delivery.Exchange,
+		delivery.RoutingKey,
+		string(delivery.Body),
+	)
+
 	if err = delivery.Ack(false); err != nil {
 		log.Error(err)
 		return

@@ -24,6 +24,10 @@ type Configuration struct {
 
 func getHandler(config *Configuration) amqp.HandlerFn {
 	return func(update *amqp.QMSUpdate) {
+		log = log.WithFields(logrus.Fields{"context": "update handler"})
+
+		log.Debugf("QMS enabled: %v", config.QMSEnabled)
+
 		if config.QMSEnabled {
 			resultBytes, err := json.Marshal(&update)
 			if err != nil {
@@ -46,6 +50,8 @@ func getHandler(config *Configuration) amqp.HandlerFn {
 			}
 
 			log.Infof("URL: %s, status code: %d, response: %s", postResp.Request.URL.String(), postResp.StatusCode, postRespBody)
+		} else {
+			log.Infof("%+v", update)
 		}
 	}
 }
