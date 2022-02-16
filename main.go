@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -51,7 +52,7 @@ func getHandler(config *Configuration) amqp.HandlerFn {
 				return
 			}
 
-			putUpdate := &QMSUsageUpdate{
+			postUpdate := &QMSUsageUpdate{
 				Username:             update.Username,
 				ResourceType:         update.Attribute,
 				UpdateType:           QMSUpdateTypeSet,
@@ -60,34 +61,36 @@ func getHandler(config *Configuration) amqp.HandlerFn {
 				UsageAdjustmentValue: updateValue,
 			}
 
-			resultBytes, err := json.Marshal(&putUpdate)
+			resultBytes, err := json.Marshal(&postUpdate)
 			if err != nil {
 				log.Error(err)
 				return
 			}
 
-			putBody := bytes.NewBuffer(resultBytes)
+			postBody := bytes.NewBuffer(resultBytes)
 
-			updateRequest, err := http.NewRequest(http.MethodPut, config.QMSEndpoint.String(), putBody)
+			config.QMSEndpoint.Path = fmt.Sprintf("%s/%s/%s", config.QMSEndpoint.Path, update.Username, update.Attribute)
+
+			updateRequest, err := http.NewRequest(http.MethodPost, config.QMSEndpoint.String(), postBody)
 			if err != nil {
 				log.Error(err)
 				return
 			}
 			updateRequest.Header.Set("Content-Type", "application/json")
 
-			putResp, err := http.DefaultClient.Do(updateRequest)
+			postResp, err := http.DefaultClient.Do(updateRequest)
 			if err != nil {
 				log.Error(err)
 				return
 			}
 
-			putRespBody, err := io.ReadAll(putResp.Body)
+			postRespBody, err := io.ReadAll(postResp.Body)
 			if err != nil {
 				log.Error(err)
 				return
 			}
 
-			log.Infof("URL: %s, status code: %d, response: %s", putResp.Request.URL.String(), putResp.StatusCode, putRespBody)
+			log.Infof("URL: %s, status code: %d, response: %s", postResp.Request.URL.String(), postResp.StatusCode, postRespBody)
 		} else {
 			log.Infof("%+v", update)
 		}
