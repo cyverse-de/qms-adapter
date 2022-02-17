@@ -23,19 +23,6 @@ type Configuration struct {
 	QMSEndpoint *url.URL
 }
 
-// QMSUsageUpdate contains the fields needed to post updates
-// to QMS.
-type QMSUsageUpdate struct {
-	Username             string  `json:"username"`
-	ResourceType         string  `json:"resource_type"`
-	UpdateType           string  `json:"update_type"`
-	UsageAdjustmentValue float64 `json:"usage_adjustment_value"`
-	EffectiveDate        string  `json:"effective_date"`
-	Unit                 string  `json:"unit"`
-}
-
-const QMSUpdateTypeSet = "SET"
-
 func getHandler(config *Configuration) amqp.HandlerFn {
 	return func(update *amqp.QMSUpdate) {
 		log = log.WithFields(logrus.Fields{"context": "update handler"})
@@ -62,9 +49,11 @@ func getHandler(config *Configuration) amqp.HandlerFn {
 			}
 
 			// The usage value is set in the query params.
-			updateRequest.URL.Query().Add("usage_value", update.Value)
+			q := updateRequest.URL.Query()
+			q.Add("usage_value", update.Value)
+			updateRequest.URL.RawQuery = q.Encode()
 
-			log.Debug("url: %s", updateRequest.URL.String())
+			log.Debugf("url: %s", updateRequest.URL.String())
 
 			postResp, err := http.DefaultClient.Do(updateRequest)
 			if err != nil {
