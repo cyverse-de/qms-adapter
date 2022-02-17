@@ -1,15 +1,12 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
-	"time"
 
 	"github.com/cyverse-de/configurate"
 	"github.com/cyverse-de/qms-adapter/amqp"
@@ -46,37 +43,28 @@ func getHandler(config *Configuration) amqp.HandlerFn {
 		log.Debugf("QMS enabled: %v", config.QMSEnabled)
 
 		if config.QMSEnabled {
-			updateValue, err := strconv.ParseFloat(update.Value, 64)
+			// Make sure the value is actually parseable as a float. We don't actually need the float value here, though.
+			_, err := strconv.ParseFloat(update.Value, 64)
 			if err != nil {
 				log.Error(err)
 				return
 			}
 
-			postUpdate := &QMSUsageUpdate{
-				Username:             update.Username,
-				ResourceType:         update.Attribute,
-				UpdateType:           QMSUpdateTypeSet,
-				EffectiveDate:        time.Now().Format("2006-01-02"),
-				Unit:                 update.Unit,
-				UsageAdjustmentValue: updateValue,
-			}
-
-			resultBytes, err := json.Marshal(&postUpdate)
-			if err != nil {
-				log.Error(err)
-				return
-			}
-
-			postBody := bytes.NewBuffer(resultBytes)
-
+			// The path format will be /v1/admin/usages/:username/:resource_type
+			// The attribute maps to the resource_type.
 			config.QMSEndpoint.Path = fmt.Sprintf("%s/%s/%s", config.QMSEndpoint.Path, update.Username, update.Attribute)
 
-			updateRequest, err := http.NewRequest(http.MethodPost, config.QMSEndpoint.String(), postBody)
+			// The request doesn't actually need a body, turns out.
+			updateRequest, err := http.NewRequest(http.MethodPost, config.QMSEndpoint.String(), nil)
 			if err != nil {
 				log.Error(err)
 				return
 			}
-			updateRequest.Header.Set("Content-Type", "application/json")
+
+			// The usage value is set in the query params.
+			updateRequest.URL.Query().Add("usage_value", update.Value)
+
+			log.Debug("url: %s", updateRequest.URL.String())
 
 			postResp, err := http.DefaultClient.Do(updateRequest)
 			if err != nil {
@@ -90,7 +78,7 @@ func getHandler(config *Configuration) amqp.HandlerFn {
 				return
 			}
 
-			log.Infof("URL: %s, status code: %d, response: %s", postResp.Request.URL.String(), postResp.StatusCode, postRespBody)
+			log.Infof("URL: %s, status code: %d, response: %s", updateRequest.URL.String(), postResp.StatusCode, postRespBody)
 		} else {
 			log.Infof("%+v", update)
 		}
