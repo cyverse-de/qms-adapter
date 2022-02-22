@@ -20,7 +20,7 @@ var log = logging.Log.WithFields(logrus.Fields{"package": "main"})
 // Configuration contains app-wide configuration settings.
 type Configuration struct {
 	QMSEnabled  bool
-	QMSEndpoint *url.URL
+	QMSEndpoint string
 }
 
 func getHandler(config *Configuration) amqp.HandlerFn {
@@ -28,6 +28,12 @@ func getHandler(config *Configuration) amqp.HandlerFn {
 		log = log.WithFields(logrus.Fields{"context": "update handler"})
 
 		log.Debugf("QMS enabled: %v", config.QMSEnabled)
+
+		apiURL, err := url.Parse(config.QMSEndpoint)
+		if err != nil {
+			log.Error(err)
+			return
+		}
 
 		if config.QMSEnabled {
 			// Make sure the value is actually parseable as a float. We don't actually need the float value here, though.
@@ -39,17 +45,17 @@ func getHandler(config *Configuration) amqp.HandlerFn {
 
 			// The path format will be /v1/admin/usages/:username/:resource_type
 			// The attribute maps to the resource_type.
-			config.QMSEndpoint.Path = fmt.Sprintf("%s/%s/%s", config.QMSEndpoint.Path, update.Username, update.Attribute)
+			apiURL.Path = fmt.Sprintf("%s/%s/%s", apiURL.Path, update.Username, update.Attribute)
 
 			// The request doesn't actually need a body, turns out.
-			updateRequest, err := http.NewRequest(http.MethodPost, config.QMSEndpoint.String(), nil)
+			updateRequest, err := http.NewRequest(http.MethodPost, apiURL.String(), nil)
 			if err != nil {
 				log.Error(err)
 				return
 			}
 
 			// The usage value is set in the query params.
-			q := updateRequest.URL.Query()
+			q := apiURL.Query()
 			q.Add("usage_value", update.Value)
 			updateRequest.URL.RawQuery = q.Encode()
 
@@ -132,7 +138,7 @@ func main() {
 
 	configuration := Configuration{
 		QMSEnabled:  qmsEnabled,
-		QMSEndpoint: qmsEndpoint,
+		QMSEndpoint: qmsEndpoint.String(),
 	}
 
 	amqpConfig := amqp.Configuration{
