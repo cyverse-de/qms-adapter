@@ -1,8 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"flag"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -23,6 +24,13 @@ type Configuration struct {
 	QMSEndpoint string
 }
 
+// QMSRequestBody contains the fields we send to QMS for every usage update.
+type QMSRequestBody struct {
+	Username     string  `json:"username"`
+	ResourceName string  `json:"resource_name"`
+	UsageValue   float64 `json:"usage_value"`
+}
+
 func getHandler(config *Configuration) amqp.HandlerFn {
 	return func(update *amqp.QMSUpdate) {
 		log = log.WithFields(logrus.Fields{"context": "update handler"})
@@ -36,28 +44,31 @@ func getHandler(config *Configuration) amqp.HandlerFn {
 		}
 
 		if config.QMSEnabled {
-			// Make sure the value is actually parseable as a float. We don't actually need the float value here, though.
-			_, err := strconv.ParseFloat(update.Value, 64)
+			parsedValue, err := strconv.ParseFloat(update.Value, 64)
 			if err != nil {
 				log.Error(err)
 				return
 			}
 
-			// The path format will be /v1/admin/usages/:username/:resource_type
-			// The attribute maps to the resource_type.
-			apiURL.Path = fmt.Sprintf("%s/%s/%s", apiURL.Path, update.Username, update.Attribute)
+			body := &QMSRequestBody{
+				ResourceName: update.Attribute,
+				Username:     update.Username,
+				UsageValue:   parsedValue,
+			}
 
-			// The request doesn't actually need a body, turns out.
-			updateRequest, err := http.NewRequest(http.MethodPost, apiURL.String(), nil)
+			marshalled, err := json.Marshal(body)
 			if err != nil {
 				log.Error(err)
 				return
 			}
 
-			// The usage value is set in the query params.
-			q := apiURL.Query()
-			q.Add("usage_value", update.Value)
-			updateRequest.URL.RawQuery = q.Encode()
+			buf := bytes.NewBuffer(marshalled)
+
+			updateRequest, err := http.NewRequest(http.MethodPost, apiURL.String(), buf)
+			if err != nil {
+				log.Error(err)
+				return
+			}
 
 			log.Debugf("url: %s", updateRequest.URL.String())
 
