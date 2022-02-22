@@ -29,6 +29,7 @@ type QMSRequestBody struct {
 	Username     string  `json:"username"`
 	ResourceName string  `json:"resource_name"`
 	UsageValue   float64 `json:"usage_value"`
+	UpdateType   string  `json:"update_type"`
 }
 
 func getHandler(config *Configuration) amqp.HandlerFn {
@@ -54,6 +55,7 @@ func getHandler(config *Configuration) amqp.HandlerFn {
 				ResourceName: update.Attribute,
 				Username:     update.Username,
 				UsageValue:   parsedValue,
+				UpdateType:   "SET",
 			}
 
 			marshalled, err := json.Marshal(body)
