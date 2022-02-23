@@ -56,9 +56,7 @@ func getHandler(config *Configuration) amqp.HandlerFn {
 				return
 			}
 
-			if strings.HasSuffix(update.Username, fullDomain) {
-				update.Username = strings.TrimSuffix(update.Username, fullDomain)
-			}
+			update.Username = strings.TrimSuffix(update.Username, fullDomain)
 
 			body := &QMSRequestBody{
 				ResourceName: update.Attribute,
