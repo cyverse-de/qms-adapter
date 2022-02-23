@@ -72,6 +72,8 @@ func getHandler(config *Configuration) amqp.HandlerFn {
 				return
 			}
 
+			updateRequest.Header.Set("Content-Type", "application/json")
+
 			log.Debugf("url: %s", updateRequest.URL.String())
 
 			postResp, err := http.DefaultClient.Do(updateRequest)
