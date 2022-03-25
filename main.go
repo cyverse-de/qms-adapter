@@ -2,22 +2,34 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cyverse-de/configurate"
 	"github.com/cyverse-de/qms-adapter/amqp"
 	"github.com/cyverse-de/qms-adapter/logging"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/jaeger"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	tracesdk "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.7.0"
 )
 
+var client = http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}
 var log = logging.Log.WithFields(logrus.Fields{"package": "main"})
 
 // Configuration contains app-wide configuration settings.
@@ -36,7 +48,7 @@ type QMSRequestBody struct {
 }
 
 func getHandler(config *Configuration) amqp.HandlerFn {
-	return func(update *amqp.QMSUpdate) {
+	return func(ctx context.Context, update *amqp.QMSUpdate) {
 		log = log.WithFields(logrus.Fields{"context": "update handler"})
 
 		log.Debugf("QMS enabled: %v", config.QMSEnabled)
@@ -73,7 +85,7 @@ func getHandler(config *Configuration) amqp.HandlerFn {
 
 			buf := bytes.NewBuffer(marshalled)
 
-			updateRequest, err := http.NewRequest(http.MethodPost, apiURL.String(), buf)
+			updateRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL.String(), buf)
 			if err != nil {
 				log.Error(err)
 				return
@@ -83,7 +95,7 @@ func getHandler(config *Configuration) amqp.HandlerFn {
 
 			log.Debugf("url: %s", updateRequest.URL.String())
 
-			postResp, err := http.DefaultClient.Do(updateRequest)
+			postResp, err := client.Do(updateRequest)
 			if err != nil {
 				log.Error(err)
 				return
@@ -102,6 +114,24 @@ func getHandler(config *Configuration) amqp.HandlerFn {
 	}
 }
 
+func jaegerTracerProvider(url string) (*tracesdk.TracerProvider, error) {
+	// Create the Jaeger exporter
+	exp, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(url)))
+	if err != nil {
+		return nil, err
+	}
+
+	tp := tracesdk.NewTracerProvider(
+		tracesdk.WithBatcher(exp),
+		tracesdk.WithResource(resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceNameKey.String("qms-adapter"),
+		)),
+	)
+
+	return tp, nil
+}
+
 func main() {
 	var (
 		err    error
@@ -112,10 +142,41 @@ func main() {
 		reconnect  = flag.Bool("reconnect", false, "Whether the AMQP client should reconnect on failure")
 		logLevel   = flag.String("log-level", "info", "One of trace, debug, info, warn, error, fatal, or panic")
 		routingKey = flag.String("routing-key", "qms.usages", "The routing key for incoming AMQP messages")
+
+		tracerProvider *tracesdk.TracerProvider
 	)
 
 	flag.Parse()
 	logging.SetupLogging(*logLevel)
+
+	otelTracesExporter := os.Getenv("OTEL_TRACES_EXPORTER")
+	if otelTracesExporter == "jaeger" {
+		jaegerEndpoint := os.Getenv("OTEL_EXPORTER_JAEGER_ENDPOINT")
+		if jaegerEndpoint == "" {
+			log.Warn("Jaeger set as OpenTelemetry trace exporter, but no Jaeger endpoint configured.")
+		} else {
+			tp, err := jaegerTracerProvider(jaegerEndpoint)
+			if err != nil {
+				log.Fatal(err)
+			}
+			tracerProvider = tp
+			otel.SetTracerProvider(tp)
+			otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+		}
+	}
+
+	if tracerProvider != nil {
+		tracerCtx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		defer func(tracerContext context.Context) {
+			ctx, cancel := context.WithTimeout(tracerContext, time.Second*5)
+			defer cancel()
+			if err := tracerProvider.Shutdown(ctx); err != nil {
+				log.Fatal(err)
+			}
+		}(tracerCtx)
+	}
 
 	log.Infof("config path is %s", *configPath)
 

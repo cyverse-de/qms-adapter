@@ -1,12 +1,13 @@
 package amqp
 
 import (
+	"context"
 	"encoding/json"
 
+	"github.com/cyverse-de/messaging/v9"
 	"github.com/cyverse-de/qms-adapter/logging"
 	"github.com/sirupsen/logrus"
 	"github.com/streadway/amqp"
-	"gopkg.in/cyverse-de/messaging.v6"
 )
 
 var log = logging.Log.WithFields(logrus.Fields{"package": "amqp"})
@@ -32,7 +33,7 @@ type QMSUpdate struct {
 }
 
 // HandlerFn is the function signature for QMS update handlers.
-type HandlerFn func(*QMSUpdate)
+type HandlerFn func(context.Context, *QMSUpdate)
 
 // AMQP encapsulates the logic for handling AMQP messages.
 type AMQP struct {
@@ -70,7 +71,7 @@ func New(config *Configuration, handler HandlerFn) (*AMQP, error) {
 	return a, err
 }
 
-func (a *AMQP) recv(delivery amqp.Delivery) {
+func (a *AMQP) recv(ctx context.Context, delivery amqp.Delivery) {
 	var (
 		update QMSUpdate
 		err    error
@@ -97,7 +98,7 @@ func (a *AMQP) recv(delivery amqp.Delivery) {
 		return
 	}
 
-	a.handler(&update)
+	a.handler(ctx, &update)
 }
 
 // Close closes the connection to the AMQP broker.
