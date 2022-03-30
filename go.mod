@@ -4,7 +4,7 @@ go 1.17
 
 require (
 	github.com/cyverse-de/configurate v0.0.0-20220113221928-13d34aae3f0f
-	github.com/cyverse-de/messaging/v9 v9.1.3
+	github.com/cyverse-de/messaging/v9 v9.1.4
 	github.com/sirupsen/logrus v1.8.1
 	github.com/spf13/viper v1.10.1
 	github.com/streadway/amqp v1.0.1-0.20200716223359-e6b33f460591
