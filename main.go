@@ -5,12 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
-	"strings"
 
 	"github.com/cyverse-de/configurate"
 	"github.com/cyverse-de/go-mod/otelutils"
@@ -31,7 +30,6 @@ var log = logging.Log.WithFields(logrus.Fields{"package": "main"})
 type Configuration struct {
 	QMSEnabled  bool
 	QMSEndpoint string
-	UserDomain  string
 }
 
 // QMSRequestBody contains the fields we send to QMS for every usage update.
@@ -48,8 +46,6 @@ func getHandler(config *Configuration) amqp.HandlerFn {
 
 		log.Debugf("QMS enabled: %v", config.QMSEnabled)
 
-		fullDomain := fmt.Sprintf("@%s", config.UserDomain)
-
 		apiURL, err := url.Parse(config.QMSEndpoint)
 		if err != nil {
 			log.Error(err)
@@ -63,7 +59,8 @@ func getHandler(config *Configuration) amqp.HandlerFn {
 				return
 			}
 
-			update.Username = strings.TrimSuffix(update.Username, fullDomain)
+			re, _ := regexp.Compile(`@.*$`)
+			update.Username = re.ReplaceAllString(update.Username, "")
 
 			body := &QMSRequestBody{
 				ResourceName: update.Attribute,
@@ -136,11 +133,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	userDomain := config.GetString("users.domain")
-	if userDomain == "" {
-		log.Fatal("users.domain must be set in the configuration file")
-	}
-
 	amqpURI := config.GetString("amqp.uri")
 	if amqpURI == "" {
 		log.Fatal("amqp.uri must be set in the configuration file")
@@ -178,7 +170,6 @@ func main() {
 	configuration := Configuration{
 		QMSEnabled:  qmsEnabled,
 		QMSEndpoint: qmsEndpoint.String(),
-		UserDomain:  userDomain,
 	}
 
 	amqpConfig := amqp.Configuration{
